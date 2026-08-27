@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#087f7a">
-  <title>ParsDo EventOS — Staff Check-in</title>
+  <title>ParsDo EventOS - Check-in Portal</title>
 
   <script src="https://unpkg.com/html5-qrcode" defer></script>
 
@@ -380,7 +380,7 @@
       </div>
       <div class="brand-meta">
         <div class="eyebrow">ParsDo EventOS</div>
-        <div class="title">Check-in</div>
+        <div class="title">Check-in Portal</div>
         <div class="subtitle">Fast, secure attendee verification</div>
       </div>
     </div>
@@ -660,19 +660,42 @@
     }
   }
 
-  async function manualCheckIn(){
+  function manualCheckIn(){
     const input = document.getElementById("manualCode");
     const button = document.querySelector('[onclick="manualCheckIn()"]');
     const code = String(input.value || "").trim().toUpperCase();
 
+    if(!eventId){
+      showResult(
+        "error",
+        "⚠️",
+        "Event Not Ready",
+        "",
+        "Please wait for the event to finish loading."
+      );
+      return;
+    }
+
     if(!code){
-      showResult("warning","!","Code Required","","Enter the attendee's 6-character check-in code.");
+      showResult(
+        "warning",
+        "!",
+        "Code Required",
+        "",
+        "Enter the attendee's 6-character check-in code."
+      );
       input.focus();
       return;
     }
 
     if(!/^[A-Z2-9]{6}$/.test(code)){
-      showResult("warning","!","Invalid Code","","Please enter a valid 6-character check-in code.");
+      showResult(
+        "warning",
+        "!",
+        "Invalid Code",
+        "",
+        "Please enter a valid 6-character check-in code."
+      );
       input.focus();
       return;
     }
@@ -682,107 +705,107 @@
       button.textContent = "CHECKING…";
     }
 
-    try {
-      const url =
-        CHECKIN_BASE
-        + "?action=manualCheckIn"
-        + "&event=" + encodeURIComponent(eventId)
-        + "&code=" + encodeURIComponent(code);
+    processing = true;
+    setStatus("Verifying manual check-in…","◉");
 
-      const response = await fetch(url, {
-        method: "GET",
-        cache: "no-store",
-        redirect: "follow"
-      });
+    const callbackName =
+      "parsdoManualCallback_" + Date.now() + "_" +
+      Math.random().toString(36).slice(2);
 
-      const text = await response.text();
+    let finished = false;
+    let timeoutId = null;
+    const script = document.createElement("script");
 
-      // The Apps Script response is an HTML result page.
-      // Extract the useful result text and keep staff on this scanner page.
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(text, "text/html");
-      const bodyText = (doc.body ? doc.body.innerText : text)
-        .replace(/\s+/g, " ")
-        .trim();
+    function finish(){
+      if(finished) return;
+      finished = true;
 
-      if(/check-in successful/i.test(bodyText)){
-        const nameMatch = bodyText.match(/Check-in Successful\s+(.+?)\s+Participant ID:/i);
-        const idMatch = bodyText.match(/Participant ID:\s*([^\s]+(?:\s+[^\s]+)*)/i);
+      if(timeoutId){
+        clearTimeout(timeoutId);
+      }
 
-        const attendeeName =
-          nameMatch ? nameMatch[1].trim() : "Participant";
+      delete window[callbackName];
 
-        const participantId =
-          idMatch ? idMatch[1].trim() : "";
+      if(script.parentNode){
+        script.parentNode.removeChild(script);
+      }
 
-        showResult(
-          "success",
-          "✓",
-          "Check-in Successful",
-          attendeeName,
-          participantId
-            ? "Participant ID: " + participantId + " · Attendance recorded."
-            : "Attendance has been recorded."
-        );
+      processing = false;
 
-        input.value = "";
-        input.focus();
+      if(button){
+        button.disabled = false;
+        button.textContent = "CHECK IN";
+      }
+    }
 
-      } else if(/already checked in/i.test(bodyText)){
+    window[callbackName] = function(result){
+      try{
+        if(result && result.success){
 
-        const nameMatch = bodyText.match(/Already Checked In\s+(.+?)\s+This participant/i);
-        const attendeeName =
-          nameMatch ? nameMatch[1].trim() : "Participant";
+          showResult(
+            "success",
+            "✓",
+            "Check-in Successful",
+            result.name || "Participant",
+            "Participant ID: " +
+            escapeHtml(result.participantId || "") +
+            " · Attendance recorded."
+          );
 
-        showResult(
-          "warning",
-          "!",
-          "Already Checked In",
-          attendeeName,
-          "This participant has already been checked in."
-        );
+          input.value = "";
+          setStatus("Check-in completed. Ready for next attendee.","✓");
 
-        input.value = "";
-        input.focus();
+        }else if(result && result.alreadyCheckedIn){
 
-      } else if(/invalid check-in code/i.test(bodyText)){
+          showResult(
+            "warning",
+            "!",
+            "Already Checked In",
+            result.name || "Participant",
+            escapeHtml(
+              result.message ||
+              "This participant has already been checked in."
+            )
+          );
 
-        showResult(
-          "error",
-          "×",
-          "Invalid Check-in Code",
-          "",
-          "This code could not be verified for this event."
-        );
+          input.value = "";
+          setStatus("Participant was already checked in.","!");
 
-        input.select();
+        }else{
 
-      } else if(/system error/i.test(bodyText)){
+          showResult(
+            "error",
+            "×",
+            "Invalid Check-in Code",
+            "",
+            escapeHtml(
+              result && result.message
+                ? result.message
+                : "This code could not be verified for this event."
+            )
+          );
+
+          input.select();
+          setStatus("Manual check-in failed.","×");
+        }
+
+      }catch(error){
 
         showResult(
           "error",
           "×",
           "System Error",
           "",
-          "ParsDo EventOS could not complete the check-in."
+          "Unable to process the check-in response."
         );
 
-        input.select();
-
-      } else {
-
-        showResult(
-          "error",
-          "×",
-          "Unable to Connect",
-          "",
-          "ParsDo EventOS did not return a valid check-in response."
-        );
-
-        input.select();
+      }finally{
+        finish();
       }
+    };
 
-    } catch (error) {
+    script.onerror = function(){
+      finish();
 
       showResult(
         "error",
@@ -793,18 +816,46 @@
       );
 
       input.select();
+      setStatus("Unable to connect to ParsDo EventOS.","×");
+    };
 
-    } finally {
+    script.src =
+      CHECKIN_BASE +
+      "?action=manualCheckIn" +
+      "&event=" + encodeURIComponent(eventId) +
+      "&code=" + encodeURIComponent(code) +
+      "&callback=" + encodeURIComponent(callbackName) +
+      "&_=" + Date.now();
 
-      if(button){
-        button.disabled = false;
-        button.textContent = "CHECK IN";
-      }
-    }
+    document.body.appendChild(script);
+
+    timeoutId = setTimeout(function(){
+      if(finished) return;
+
+      finish();
+
+      showResult(
+        "error",
+        "×",
+        "Request Timed Out",
+        "",
+        "ParsDo EventOS did not respond. Please try again."
+      );
+
+      input.select();
+      setStatus("No response from ParsDo EventOS.","×");
+    }, 15000);
   }
 
   document.getElementById("manualCode").addEventListener("input", function(){
     this.value = this.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6);
+  });
+
+  document.getElementById("manualCode").addEventListener("keydown", function(event){
+    if(event.key === "Enter"){
+      event.preventDefault();
+      manualCheckIn();
+    }
   });
 
   loadEvent();
