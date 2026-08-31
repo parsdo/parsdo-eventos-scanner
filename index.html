@@ -853,148 +853,458 @@
     }
   }
 
-  async function manualCheckIn(){
-    const input = document.getElementById("manualCode");
-    const button = document.querySelector('[onclick="manualCheckIn()"]');
-    const code = String(input.value || "").trim().toUpperCase();
+async function manualCheckIn(){
 
-    if(!code){
-      showResult("warning","!","Code Required","","Enter the attendee's 6-character check-in code.");
-      input.focus();
-      return;
+  const input =
+    document.getElementById("manualCode");
+
+  const button =
+    document.querySelector(
+      '[onclick="manualCheckIn()"]'
+    );
+
+  const code =
+    String(input.value || "")
+      .trim()
+      .toUpperCase();
+
+
+  // ==========================================
+  // VALIDATE EVENT
+  // ==========================================
+
+  if(!eventId){
+
+    showResult(
+      "error",
+      "⚠️",
+      "Event Not Ready",
+      "",
+      "Please wait for the event to finish loading."
+    );
+
+    return;
+  }
+
+
+  // ==========================================
+  // VALIDATE CODE
+  // ==========================================
+
+  if(!code){
+
+    showResult(
+      "warning",
+      "!",
+      "Code Required",
+      "",
+      "Enter the attendee's 6-character check-in code."
+    );
+
+    input.focus();
+
+    return;
+  }
+
+
+  if(!/^[A-Z2-9]{6}$/.test(code)){
+
+    showResult(
+      "warning",
+      "!",
+      "Invalid Code",
+      "",
+      "Please enter a valid 6-character check-in code."
+    );
+
+    input.focus();
+
+    return;
+  }
+
+
+  // ==========================================
+  // DISABLE BUTTON
+  // ==========================================
+
+  if(button){
+
+    button.disabled = true;
+    button.textContent = "CHECKING…";
+
+  }
+
+
+  processing = true;
+
+  setStatus(
+    "Verifying manual check-in…",
+    "◉"
+  );
+
+
+  // ==========================================
+  // JSONP CALLBACK
+  // ==========================================
+
+  const callbackName =
+    "parsdoManualCallback_" +
+    Date.now() +
+    "_" +
+    Math.random()
+      .toString(36)
+      .slice(2);
+
+
+  const script =
+    document.createElement("script");
+
+
+  let finished = false;
+
+  let timeoutId = null;
+
+
+  function finish(){
+
+    if(finished) return;
+
+    finished = true;
+
+
+    if(timeoutId){
+
+      clearTimeout(timeoutId);
+
     }
 
-    if(!/^[A-Z2-9]{6}$/.test(code)){
-      showResult("warning","!","Invalid Code","","Please enter a valid 6-character check-in code.");
-      input.focus();
-      return;
+
+    try{
+
+      delete window[callbackName];
+
+    }catch(e){
+
+      window[callbackName] =
+        undefined;
+
     }
+
+
+    if(script.parentNode){
+
+      script.parentNode
+        .removeChild(script);
+
+    }
+
+
+    processing = false;
+
 
     if(button){
-      button.disabled = true;
-      button.textContent = "CHECKING…";
+
+      button.disabled = false;
+
+      button.textContent =
+        "CHECK IN";
+
     }
 
-    try {
-      const url =
-        CHECKIN_BASE
-        + "?action=manualCheckIn"
-        + "&event=" + encodeURIComponent(eventId)
-        + "&code=" + encodeURIComponent(code);
+  }
 
-      const response = await fetch(url, {
-        method: "GET",
-        cache: "no-store",
-        redirect: "follow"
-      });
 
-      const text = await response.text();
+  // ==========================================
+  // RECEIVE APPS SCRIPT RESPONSE
+  // ==========================================
 
-      // The Apps Script response is an HTML result page.
-      // Extract the useful result text and keep staff on this scanner page.
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(text, "text/html");
-      const bodyText = (doc.body ? doc.body.innerText : text)
-        .replace(/\s+/g, " ")
-        .trim();
+  window[callbackName] =
+    function(result){
 
-      if(/check-in successful/i.test(bodyText)){
-        const nameMatch = bodyText.match(/Check-in Successful\s+(.+?)\s+Participant ID:/i);
-        const idMatch = bodyText.match(/Participant ID:\s*([^\s]+(?:\s+[^\s]+)*)/i);
+      try{
 
-        const attendeeName =
-          nameMatch ? nameMatch[1].trim() : "Participant";
+        // ====================================
+        // SUCCESS
+        // ====================================
 
-        const participantId =
-          idMatch ? idMatch[1].trim() : "";
+        if(
+          result &&
+          result.success
+        ){
 
-        showResult(
-          "success",
-          "✓",
-          "Check-in Successful",
-          attendeeName,
-          participantId
-            ? "Participant ID: " + participantId + " · Attendance recorded."
-            : "Attendance has been recorded."
-        );
+          showResult(
 
-        input.value = "";
-        input.focus();
+            "success",
 
-      } else if(/already checked in/i.test(bodyText)){
+            "✓",
 
-        const nameMatch = bodyText.match(/Already Checked In\s+(.+?)\s+This participant/i);
-        const attendeeName =
-          nameMatch ? nameMatch[1].trim() : "Participant";
+            "Check-in Successful",
 
-        showResult(
-          "warning",
-          "!",
-          "Already Checked In",
-          attendeeName,
-          "This participant has already been checked in."
-        );
+            result.name ||
+              "Participant",
 
-        input.value = "";
-        input.focus();
+            result.participantId
 
-      } else if(/invalid check-in code/i.test(bodyText)){
+              ? "Participant ID: " +
+                escapeHtml(
+                  result.participantId
+                ) +
+                "<br><br>" +
+                "Attendance has been recorded."
 
-        showResult(
-          "error",
-          "×",
-          "Invalid Check-in Code",
-          "",
-          "This code could not be verified for this event."
-        );
+              : "Attendance has been recorded."
 
-        input.select();
+          );
 
-      } else if(/system error/i.test(bodyText)){
 
-        showResult(
-          "error",
-          "×",
-          "System Error",
-          "",
-          "ParsDo EventOS could not complete the check-in."
-        );
+          input.value = "";
 
-        input.select();
 
-      } else {
+          setStatus(
 
-        showResult(
-          "error",
-          "×",
-          "Unable to Connect",
-          "",
-          "ParsDo EventOS did not return a valid check-in response."
-        );
+            "Check-in completed. Tap SCAN NEXT ATTENDEE.",
 
-        input.select();
+            "✓"
+
+          );
+
+        }
+
+
+        // ====================================
+        // ALREADY CHECKED IN
+        // ====================================
+
+        else if(
+          result &&
+          result.alreadyCheckedIn
+        ){
+
+          let message =
+            result.message ||
+            "This participant was already checked in.";
+
+
+          if(result.time){
+
+            message +=
+              "<br><br><b>Time:</b> " +
+              escapeHtml(result.time);
+
+          }
+
+
+          showResult(
+
+            "warning",
+
+            "!",
+
+            "Already Checked In",
+
+            result.name ||
+              "Participant",
+
+            escapeHtml(message)
+
+          );
+
+
+          input.value = "";
+
+
+          setStatus(
+
+            "Participant was already checked in.",
+
+            "!"
+
+          );
+
+        }
+
+
+        // ====================================
+        // INVALID CODE
+        // ====================================
+
+        else{
+
+          showResult(
+
+            "error",
+
+            "×",
+
+            "Invalid Check-in Code",
+
+            "",
+
+            escapeHtml(
+
+              result &&
+              result.message
+
+                ? result.message
+
+                : "This code could not be verified for this event."
+
+            )
+
+          );
+
+
+          input.focus();
+
+
+          setStatus(
+
+            "Manual check-in failed.",
+
+            "×"
+
+          );
+
+        }
+
       }
 
-    } catch (error) {
+      catch(error){
+
+        showResult(
+
+          "error",
+
+          "×",
+
+          "System Error",
+
+          "",
+
+          "Unable to process the check-in response."
+
+        );
+
+      }
+
+      finally{
+
+        finish();
+
+      }
+
+    };
+
+
+  // ==========================================
+  // SCRIPT ERROR
+  // ==========================================
+
+  script.onerror =
+    function(){
+
+      finish();
+
 
       showResult(
+
         "error",
+
         "×",
+
         "Connection Error",
+
         "",
+
         "Unable to connect to ParsDo EventOS. Please check the network and try again."
+
       );
 
-      input.select();
 
-    } finally {
+      setStatus(
 
-      if(button){
-        button.disabled = false;
-        button.textContent = "CHECK IN";
-      }
-    }
-  }
+        "Connection failed.",
+
+        "×"
+
+      );
+
+    };
+
+
+  // ==========================================
+  // CALL APPS SCRIPT
+  // ==========================================
+
+  script.src =
+
+    CHECKIN_BASE +
+
+    "?action=manualCheckIn" +
+
+    "&event=" +
+    encodeURIComponent(eventId) +
+
+    "&code=" +
+    encodeURIComponent(code) +
+
+    "&callback=" +
+    encodeURIComponent(callbackName) +
+
+    "&_=" +
+    Date.now();
+
+
+  document.body.appendChild(
+    script
+  );
+
+
+  // ==========================================
+  // TIMEOUT
+  // ==========================================
+
+  timeoutId =
+    setTimeout(
+
+      function(){
+
+        if(finished) return;
+
+
+        finish();
+
+
+        showResult(
+
+          "error",
+
+          "×",
+
+          "Request Timed Out",
+
+          "",
+
+          "ParsDo EventOS did not respond in time. Please try again."
+
+        );
+
+
+        setStatus(
+
+          "Manual check-in request timed out.",
+
+          "×"
+
+        );
+
+      },
+
+      10000
+
+    );
+
+}
 
   document.getElementById("manualCode").addEventListener("input", function(){
     this.value = this.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6);
